@@ -19,8 +19,9 @@ use std::path::PathBuf;
 use ratatui::style::{Stylize};
 use home;
 use home::home_dir;
-use ratatui::widgets::BorderType;
-use crate::todo_colors::{DARKGRAY, DARKORANGE, DARKRED, HELP_BACKGROUND, LIGHTGRAY, RED, YELLOW, DARKYELLOW, ORANGE};
+use ratatui::widgets::{BorderType, Clear};
+use crate::todo_colors::{DARKGRAY, DARKORANGE, DARKRED, HELP_BACKGROUND, LIGHTGRAY,
+                         RED, YELLOW, DARKYELLOW, ORANGE};
 use arboard;
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -31,7 +32,7 @@ struct TodoItem {
     delete: bool,
 }
 
-enum InputMode { Normal, Edit, Move }
+enum InputMode { Normal, Edit, Move}
 
 struct TaskList {
     title: String,
@@ -93,6 +94,8 @@ struct App {
     lists: [TaskList; 2],
     active_idx: usize,
     cursor_pos: usize,
+    edit_task: bool,
+    show_help: bool,
 }
 
 impl App {
@@ -116,6 +119,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         ],
         active_idx: 0,
         cursor_pos: 0,
+        edit_task: false,
+        show_help: false,
     };
 
     loop {
@@ -125,19 +130,34 @@ fn main() -> Result<(), Box<dyn Error>> {
             match app.input_mode {
                 InputMode::Normal => match key.code {
                     KeyCode::Char('q') => break,
-                    KeyCode::Char('a') => app.input_mode = InputMode::Edit,
+                    KeyCode::Char('?') => app.show_help = !app.show_help,
+                    KeyCode::Char('a') => { app.input_mode = InputMode::Edit; app.edit_task= false; }
+                    KeyCode::Char('e') => {
+                        app.input_mode = InputMode::Edit;
+                        if let Some(selected) = app.active_list().state.selected() {
+                            let selected_todo = app.active_list().items[selected].clone();
+                            app.input.insert_str(0, selected_todo.task.to_string().as_str());
+                            app.cursor_pos = app.input.len();
+                        }
+                        if app.active_list().items.len() > 0 { app.edit_task = true; }
+                        else { app.edit_task = false; }
+                    }
                     KeyCode::Char('m') => app.input_mode = InputMode::Move,
-                    KeyCode::Tab | KeyCode::Char('s') | KeyCode::Right | KeyCode::Left => app.active_idx = 1 - app.active_idx,
+                    KeyCode::Tab | KeyCode::Char('s') | KeyCode::Right | KeyCode::Left =>
+                        app.active_idx = 1 - app.active_idx,
                     KeyCode::Up | KeyCode::Char('p') => app.active_list().scroll(-1),
                     KeyCode::Down | KeyCode::Char('n') => app.active_list().scroll(1),
-                    KeyCode::Char('i') | KeyCode::Char('*') => app.active_list().toggle_selected(|i| i.important = !i.important),
+                    KeyCode::Char('i') | KeyCode::Char('*') =>
+                        app.active_list().toggle_selected(|i| i.important = !i.important),
                     KeyCode::Char('d') => app.active_list().toggle_selected(|i| i.delete = !i.delete),
-                    KeyCode::Char('x') => { app.active_list().items.retain(|i| !i.delete); app.active_list().save(); }
+                    KeyCode::Char('x') => {
+                        app.active_list().items.retain(|i| !i.delete);
+                        app.active_list().save();
+                    }
                     KeyCode::Char('c') => {
                         if key.modifiers.contains(event::KeyModifiers::CONTROL) {
                             if let Some(selected) = app.active_list().state.selected() {
                                 let selected_text = app.active_list().items[selected].task.clone();
-                                // Use arboard to copy
                                 if let Ok(mut clipboard) = arboard::Clipboard::new() {
                                     let _ = clipboard.set_text(selected_text);
                                 }
@@ -153,10 +173,28 @@ fn main() -> Result<(), Box<dyn Error>> {
                     KeyCode::Enter => {
                         let task = app.input.drain(..).collect();
                         if !String::from(&task).is_empty() {
-                            app.active_list().items.push(TodoItem { task, complete: false, important: false, delete: false });
-                            app.active_list().state.select_last();
+                            if !app.edit_task {
+                                app.active_list().items.push(
+                                    TodoItem { task, complete: false, important: false, delete: false });
+                                app.active_list().state.select_last();
+                            }
+                            else {
+                                let selected: Option<usize>;
+                                selected = app.active_list().state.selected();
+                                app.cursor_pos = app.input.len();
+
+                                let task_c = app.active_list().items.get(selected.unwrap()).unwrap().complete;
+                                let task_d = app.active_list().items.get(selected.unwrap()).unwrap().delete;
+                                let task_i = app.active_list().items.get(selected.unwrap()).unwrap().important;
+
+                                app.active_list().items.remove(selected.unwrap());
+                                app.active_list().items.insert(
+                                    selected.unwrap(),
+                                    TodoItem { task: task.to_string(),
+                                        complete: task_c,
+                                        important: task_i, delete: task_d });
+                            }
                         }
-                        // if !app.input.is_empty() { app.input_mode = InputMode::Normal }
                         app.active_list().save();
                         app.input_mode = InputMode::Normal;
                         app.cursor_pos = 0;
@@ -219,6 +257,7 @@ fn ui(f: &mut Frame, app: &mut App) {
     let panels = Layout::horizontal([Constraint::Percentage(50),
         Constraint::Percentage(50)]).split(chunks[0]);
 
+
     match app.input_mode  {
         InputMode::Edit => {
             f.set_cursor_position(
@@ -229,7 +268,7 @@ fn ui(f: &mut Frame, app: &mut App) {
         }
         _ => {}
     }
-    
+
     for (i, list) in app.lists.iter_mut().enumerate() {
         let is_active = i == app.active_idx;
 
@@ -353,7 +392,9 @@ fn ui(f: &mut Frame, app: &mut App) {
     }
 
     let input_block = Block::default()
-        .title(" Add task: Type task followed by Enter  ")
+        .title(
+            if !app.edit_task {" Add: Type task followed by Enter "}
+            else {" Edit: Revise task followed by Enter "})
         .title_style(Style::default().bold())
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
@@ -373,6 +414,8 @@ fn ui(f: &mut Frame, app: &mut App) {
     let help_msg1 = Line::from(vec![
         Span::styled(" a", hotkey_style), Span::styled("dd", text_style),
         Span::styled(" | ", pipe_style),
+        Span::styled("e", hotkey_style), Span::styled("dit", text_style),
+        Span::styled(" | ", pipe_style),
         Span::styled("p", hotkey_style), Span::styled("revious", text_style),
         Span::styled(" | ", pipe_style),
         Span::styled("n", hotkey_style), Span::styled("ext", text_style),
@@ -386,10 +429,12 @@ fn ui(f: &mut Frame, app: &mut App) {
         Span::styled("e", text_style), Span::styled("x", hotkey_style),
         Span::styled("punge", text_style),
         Span::styled(" | ", pipe_style),
-        Span::styled("m", hotkey_style), Span::styled("ove ", text_style),
+        Span::styled("? ", hotkey_style),
     ]).left_aligned();
     let help_msg2 = Line::from(vec![
-        Span::styled(" s", hotkey_style), Span::styled("witch", text_style),
+        Span::styled(" m", hotkey_style), Span::styled("ove", text_style),
+        Span::styled(" | ", pipe_style),
+        Span::styled("s", hotkey_style), Span::styled("witch", text_style),
         Span::styled(" | ", pipe_style),
         Span::styled("copy item: ", text_style), Span::styled("ctrl-c ", hotkey_style),
         Span::styled(" | ", pipe_style),
@@ -404,4 +449,65 @@ fn ui(f: &mut Frame, app: &mut App) {
     f.render_widget(Paragraph::new(vec![help_msg1, help_msg2])
                         .bg(HELP_BACKGROUND).fg(Color::White),
                     chunks[2]);
+
+    if app.show_help {
+        let area = centered_rect(f.area()); // 60% width, 20% height
+        // let area = centered_rect(60, 20, f.area()); // 60% width, 20% height
+        let help_text = vec![
+            Line::from(Span::styled(" https://github.com/mabognar ", Color::White)),
+            Line::from(vec![Span::styled(" https://crates.io/crates/xtodo ", Color::White)]),
+            // Line::from(vec![Span::raw(" To close, type "),
+            //                 Span::styled("? ", Color::LightRed)])
+        ];
+
+        const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
+        let block = Block::default()
+            .title(Line::from(vec![Span::raw(" xtodo "), Span::raw(format!("({}) ",PKG_VERSION))]))
+            .title_bottom(Line::from(vec![Span::raw(" To close, type "),
+                                          Span::styled("? ", Color::LightRed)]))
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(ORANGE))
+            .bg(Color::Black);
+
+        let help_para = Paragraph::new(help_text)
+            .block(block)
+            .wrap(ratatui::widgets::Wrap { trim: true });
+
+        f.render_widget(Clear, area); // This clears the area under the popup
+        f.render_widget(help_para, area);
+    }
+
+    fn centered_rect(r: ratatui::layout::Rect) -> ratatui::layout::Rect {
+        let popup_layout = Layout::vertical([
+            Constraint::Fill(1),
+            Constraint::Length(4),
+            Constraint::Fill(1),
+        ])
+            .split(r);
+
+        Layout::horizontal([
+            Constraint::Fill(1),
+            Constraint::Length(33),
+            Constraint::Fill(1),
+        ])
+            .split(popup_layout[1])[1]
+    }
+
+    // fn centered_rect(percent_x: u16, percent_y: u16, r: ratatui::layout::Rect) -> ratatui::layout::Rect {
+    //     let popup_layout = Layout::vertical([
+    //         Constraint::Percentage((100 - percent_y) / 2),
+    //         Constraint::Percentage(percent_y),
+    //         Constraint::Percentage((100 - percent_y) / 2),
+    //     ])
+    //         .split(r);
+    //
+    //     Layout::horizontal([
+    //         Constraint::Percentage((100 - percent_x) / 2),
+    //         Constraint::Percentage(percent_x),
+    //         Constraint::Percentage((100 - percent_x) / 2),
+    //     ])
+    //         .split(popup_layout[1])[1]
+    // }
+
 }

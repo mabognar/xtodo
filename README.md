@@ -15,4 +15,3 @@ Alternatively, run
 ```
 cargo install xtodo
 ```
-

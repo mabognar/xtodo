@@ -16,4 +16,4 @@ pub const DARKYELLOW: Color = Color::Rgb(85, 82, 53);
 // pub const GRAY: Color = Color::Rgb(60, 60, 60);
 pub const LIGHTGRAY: Color = Color::Rgb(120, 120, 120);
 pub const DARKGRAY: Color = Color::Rgb(30, 30, 30);
-pub const HELP_BACKGROUND: Color = Color::Rgb(40, 40, 40);
+pub const HELP_BACKGROUND: Color = Color::Rgb(0, 0, 0);

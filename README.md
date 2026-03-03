@@ -10,7 +10,7 @@ In suitable directory, run
 git clone https://github.com/mabognar/xtodo
 cd xtodo
 cargo install --path .
-xtop
+xtodo
 ```
 Alternatively, run
 ```

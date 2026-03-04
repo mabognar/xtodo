@@ -23,6 +23,7 @@ use ratatui::widgets::{BorderType, Clear};
 use crate::todo_colors::{DARKGRAY, DARKORANGE, DARKRED, HELP_BACKGROUND, LIGHTGRAY,
                          RED, YELLOW, DARKYELLOW, ORANGE};
 use arboard;
+use crossterm::event::KeyEventKind;
 
 #[derive(Serialize, Deserialize, Clone)]
 struct TodoItem {
@@ -127,115 +128,120 @@ fn main() -> Result<(), Box<dyn Error>> {
         terminal.draw(|f| ui(f, &mut app))?;
 
         if let Event::Key(key) = event::read()? {
-            match app.input_mode {
-                InputMode::Normal => match key.code {
-                    KeyCode::Char('q') => break,
-                    KeyCode::Char('?') => app.show_help = !app.show_help,
-                    KeyCode::Char('a') => { app.input_mode = InputMode::Edit; app.edit_task= false; }
-                    KeyCode::Char('e') => {
-                        app.input_mode = InputMode::Edit;
-                        if let Some(selected) = app.active_list().state.selected() {
-                            let selected_todo = app.active_list().items[selected].clone();
-                            app.input.insert_str(0, selected_todo.task.to_string().as_str());
-                            app.cursor_pos = app.input.len();
+            if key.kind == KeyEventKind::Press {
+                match app.input_mode {
+                    InputMode::Normal => match key.code {
+                        KeyCode::Char('q') => break,
+                        KeyCode::Char('?') => app.show_help = !app.show_help,
+                        KeyCode::Char('a') => {
+                            app.input_mode = InputMode::Edit;
+                            app.edit_task = false;
                         }
-                        if app.active_list().items.len() > 0 { app.edit_task = true; }
-                        else { app.edit_task = false; }
-                    }
-                    KeyCode::Char('m') => app.input_mode = InputMode::Move,
-                    KeyCode::Tab | KeyCode::Char('s') | KeyCode::Right | KeyCode::Left =>
-                        app.active_idx = 1 - app.active_idx,
-                    KeyCode::Up | KeyCode::Char('p') => app.active_list().scroll(-1),
-                    KeyCode::Down | KeyCode::Char('n') => app.active_list().scroll(1),
-                    KeyCode::Char('i') | KeyCode::Char('*') =>
-                        app.active_list().toggle_selected(|i| i.important = !i.important),
-                    KeyCode::Char('d') => app.active_list().toggle_selected(|i| i.delete = !i.delete),
-                    KeyCode::Char('x') => {
-                        app.active_list().items.retain(|i| !i.delete);
-                        app.active_list().save();
-                    }
-                    KeyCode::Char('c') => {
-                        if key.modifiers.contains(event::KeyModifiers::CONTROL) {
+                        KeyCode::Char('e') => {
+                            app.input_mode = InputMode::Edit;
                             if let Some(selected) = app.active_list().state.selected() {
-                                let selected_text = app.active_list().items[selected].task.clone();
-                                if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                                    let _ = clipboard.set_text(selected_text);
+                                let selected_todo = app.active_list().items[selected].clone();
+                                app.input.insert_str(0, selected_todo.task.to_string().as_str());
+                                app.cursor_pos = app.input.len();
+                            }
+                            if app.active_list().items.len() > 0 { app.edit_task = true; } else { app.edit_task = false; }
+                        }
+                        KeyCode::Char('m') => app.input_mode = InputMode::Move,
+                        KeyCode::Tab | KeyCode::Char('s') | KeyCode::Right | KeyCode::Left =>
+                            app.active_idx = 1 - app.active_idx,
+                        KeyCode::Up | KeyCode::Char('p') => app.active_list().scroll(-1),
+                        KeyCode::Down | KeyCode::Char('n') => app.active_list().scroll(1),
+                        KeyCode::Char('i') | KeyCode::Char('*') =>
+                            app.active_list().toggle_selected(|i| i.important = !i.important),
+                        KeyCode::Char('d') => app.active_list().toggle_selected(|i| i.delete = !i.delete),
+                        KeyCode::Char('x') => {
+                            app.active_list().items.retain(|i| !i.delete);
+                            app.active_list().save();
+                        }
+                        KeyCode::Char('c') => {
+                            if key.modifiers.contains(event::KeyModifiers::CONTROL) {
+                                if let Some(selected) = app.active_list().state.selected() {
+                                    let selected_text = app.active_list().items[selected].task.clone();
+                                    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                        let _ = clipboard.set_text(selected_text);
+                                    }
+                                }
+                            } else {
+                                app.active_list().toggle_selected(|i| i.complete = !i.complete)
+                            }
+                        }
+                        _ => {}
+                    },
+                    InputMode::Edit => match key.code {
+                        KeyCode::Enter => {
+                            let task = app.input.drain(..).collect();
+                            if !String::from(&task).is_empty() {
+                                if !app.edit_task {
+                                    app.active_list().items.push(
+                                        TodoItem { task, complete: false, important: false, delete: false });
+                                    app.active_list().state.select_last();
+                                } else {
+                                    let selected: Option<usize>;
+                                    selected = app.active_list().state.selected();
+                                    app.cursor_pos = app.input.len();
+
+                                    let task_c = app.active_list().items.get(selected.unwrap()).unwrap().complete;
+                                    let task_d = app.active_list().items.get(selected.unwrap()).unwrap().delete;
+                                    let task_i = app.active_list().items.get(selected.unwrap()).unwrap().important;
+
+                                    app.active_list().items.remove(selected.unwrap());
+                                    app.active_list().items.insert(
+                                        selected.unwrap(),
+                                        TodoItem {
+                                            task: task.to_string(),
+                                            complete: task_c,
+                                            important: task_i,
+                                            delete: task_d
+                                        });
                                 }
                             }
-                        }
-                        else {
-                            app.active_list().toggle_selected(|i| i.complete = !i.complete)
-                        }
-                    }
-                    _ => {}
-                },
-                InputMode::Edit => match key.code {
-                    KeyCode::Enter => {
-                        let task = app.input.drain(..).collect();
-                        if !String::from(&task).is_empty() {
-                            if !app.edit_task {
-                                app.active_list().items.push(
-                                    TodoItem { task, complete: false, important: false, delete: false });
-                                app.active_list().state.select_last();
-                            }
-                            else {
-                                let selected: Option<usize>;
-                                selected = app.active_list().state.selected();
-                                app.cursor_pos = app.input.len();
-
-                                let task_c = app.active_list().items.get(selected.unwrap()).unwrap().complete;
-                                let task_d = app.active_list().items.get(selected.unwrap()).unwrap().delete;
-                                let task_i = app.active_list().items.get(selected.unwrap()).unwrap().important;
-
-                                app.active_list().items.remove(selected.unwrap());
-                                app.active_list().items.insert(
-                                    selected.unwrap(),
-                                    TodoItem { task: task.to_string(),
-                                        complete: task_c,
-                                        important: task_i, delete: task_d });
-                            }
-                        }
-                        app.active_list().save();
-                        app.input_mode = InputMode::Normal;
-                        app.cursor_pos = 0;
-                    }
-                    KeyCode::Char(c) => {
-                        app.input.insert(app.cursor_pos, c);
-                        app.cursor_pos += 1;
-                        // app.input.push(c)
-                    },
-                    KeyCode::Backspace => {
-                        if app.cursor_pos > 0 {
-                            // Remove character behind the cursor
-                            app.input.remove(app.cursor_pos - 1);
-                            app.cursor_pos -= 1;
-                        } else if app.input.is_empty() {
+                            app.active_list().save();
                             app.input_mode = InputMode::Normal;
+                            app.cursor_pos = 0;
                         }
-                        // if app.input.pop().is_none() { app.input_mode = InputMode::Normal }
-                    }
-                    KeyCode::Left => {
-                        if app.cursor_pos > 0 {
-                            app.cursor_pos -= 1;
-                        }
-                    }
-                    KeyCode::Right => {
-                        if app.cursor_pos < app.input.len() {
+                        KeyCode::Char(c) => {
+                            app.input.insert(app.cursor_pos, c);
                             app.cursor_pos += 1;
+                            // app.input.push(c)
+                        },
+                        KeyCode::Backspace => {
+                            if app.cursor_pos > 0 {
+                                // Remove character behind the cursor
+                                app.input.remove(app.cursor_pos - 1);
+                                app.cursor_pos -= 1;
+                            } else if app.input.is_empty() {
+                                app.input_mode = InputMode::Normal;
+                            }
+                            // if app.input.pop().is_none() { app.input_mode = InputMode::Normal }
                         }
-                    }
-                    KeyCode::Esc => {
-                        app.input_mode = InputMode::Normal;
-                        app.cursor_pos = 0;
-                        // app.input_mode = InputMode::Normal
+                        KeyCode::Left => {
+                            if app.cursor_pos > 0 {
+                                app.cursor_pos -= 1;
+                            }
+                        }
+                        KeyCode::Right => {
+                            if app.cursor_pos < app.input.len() {
+                                app.cursor_pos += 1;
+                            }
+                        }
+                        KeyCode::Esc => {
+                            app.input_mode = InputMode::Normal;
+                            app.cursor_pos = 0;
+                            // app.input_mode = InputMode::Normal
+                        },
+                        _ => {}
                     },
-                    _ => {}
-                },
-                InputMode::Move => match key.code {
-                    KeyCode::Up | KeyCode::Char('p') => app.active_list().move_item(-1),
-                    KeyCode::Down | KeyCode::Char('n') => app.active_list().move_item(1),
-                    KeyCode::Esc | KeyCode::Enter => app.input_mode = InputMode::Normal,
-                    _ => {}
+                    InputMode::Move => match key.code {
+                        KeyCode::Up | KeyCode::Char('p') => app.active_list().move_item(-1),
+                        KeyCode::Down | KeyCode::Char('n') => app.active_list().move_item(1),
+                        KeyCode::Esc | KeyCode::Enter => app.input_mode = InputMode::Normal,
+                        _ => {}
+                    }
                 }
             }
         }
@@ -293,9 +299,9 @@ fn ui(f: &mut Frame, app: &mut App) {
         };
 
         // 1. Calculate the available text width dynamically
-        let inner_width = panels[i].width.saturating_sub(3) as usize; // Account for left/right borders
+        let inner_width = panels[i].width.saturating_sub(3) as usize;
         let prefix_width = 6; // "[CD] * " takes 7 characters
-        let wrap_width = inner_width.saturating_sub(prefix_width).max(5); // Minimum clamp
+        let wrap_width = inner_width.saturating_sub(prefix_width).max(5);
 
         // 2. Renamed closure arg to `item` to avoid shadowing outer `i`
         let items: Vec<ListItem> = list.items.iter().map(|item| {
@@ -462,7 +468,8 @@ fn ui(f: &mut Frame, app: &mut App) {
 
         const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
         let block = Block::default()
-            .title(Line::from(vec![Span::raw(" xtodo "), Span::raw(format!("({}) ",PKG_VERSION))]))
+            .title(Line::from(vec![Span::raw(" xtodo "),
+                                   Span::raw(format!("({}) ",PKG_VERSION))]))
             .title_bottom(Line::from(vec![Span::raw(" To close, type "),
                                           Span::styled("? ", Color::LightRed)]))
             .borders(Borders::ALL)

@@ -1,9 +1,9 @@
 [package]
 name = "xtodo"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 license = "MIT"
-keywords = ["to-do", "list", "organizer"]
+keywords = ["to-do", "list", "notes", "organizer"]
 categories = ["command-line-utilities"]
 description = "To-do and note application using the terminal user interface (TUI) written in Rust. Simple, nice-looking, efficient, and intuitive. Tested on Linux and MacOS (Windows not tested)."
 readme = true
@@ -13,7 +13,7 @@ repository = "https://github.com/mabognar/xtodo"
 [dependencies]
 crossterm = "0.29.0"
 ratatui = "0.30.0"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
 home = "0.5.12"
 arboard = "3.6.1"

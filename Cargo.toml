@@ -1,11 +1,11 @@
 [package]
 name = "xtodo"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2021"
 license = "MIT"
 keywords = ["to-do", "list", "notes", "organizer"]
 categories = ["command-line-utilities"]
-description = "To-do and note application using the terminal user interface (TUI) written in Rust. Simple, nice-looking, efficient, and intuitive. Tested on Linux and MacOS (Windows not tested)."
+description = "To-do and note application using the terminal user interface (TUI) written in Rust. Simple, nice-looking, efficient, and intuitive. Tested on Linux, macOS, and Windows."
 readme = true
 documentation = "https://docs.rs/xtodo"
 repository = "https://github.com/mabognar/xtodo"

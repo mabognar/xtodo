@@ -1,5 +1,3 @@
-mod todo_colors;
-
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
     execute,
@@ -20,10 +18,9 @@ use ratatui::style::{Stylize};
 use home;
 use home::home_dir;
 use ratatui::widgets::{BorderType, Clear};
-use crate::todo_colors::{DARKGRAY, DARKORANGE, DARKRED, HELP_BACKGROUND, LIGHTGRAY,
-                         RED, YELLOW, DARKYELLOW, ORANGE};
 use arboard;
 use crossterm::event::KeyEventKind;
+use std::path::Path;
 
 #[derive(Serialize, Deserialize, Clone)]
 struct TodoItem {
@@ -33,11 +30,12 @@ struct TodoItem {
     delete: bool,
 }
 
-enum InputMode { Normal, Edit, Move}
+enum InputMode { Normal, Edit, Move }
+#[derive(Serialize, Deserialize, Clone)]
+enum Theme { Default, Light }
 
 struct TaskList {
     title: String,
-    title_color: Color,
     path: String,
     items: Vec<TodoItem>,
     state: ListState,
@@ -45,14 +43,14 @@ struct TaskList {
 
 impl TaskList {
 
-    fn new(title: &str, title_color: Color, path: &str) -> Self {
+    fn new(title: &str, path: &str) -> Self {
         let items: Vec<TodoItem> = fs::read_to_string(path)
             .ok()
             .and_then(|data| serde_json::from_str(&data).ok())
             .unwrap_or_default();
         let mut state = ListState::default();
         if !items.is_empty() { state.select(Some(0)); }
-        Self { title: title.to_string(), title_color, path: path.to_string(), items, state }
+        Self { title: title.to_string(), path: path.to_string(), items, state }
     }
 
     fn save(&self) {
@@ -60,6 +58,12 @@ impl TaskList {
             let _ = fs::write(&self.path, json);
         }
     }
+
+    // fn save_theme(app: App) {
+    //     if let Ok(json) = serde_json::to_string_pretty(&app.theme) {
+    //         let _ = fs::write(Path::new(home_dir().unwrap().as_path()).join(".xtodo/theme.json"), json);
+    //     }
+    // }
 
     fn scroll(&mut self, delta: i32) {
         if self.items.is_empty() { return; }
@@ -97,6 +101,7 @@ struct App {
     cursor_pos: usize,
     edit_task: bool,
     show_help: bool,
+    theme: Theme,
 }
 
 impl App {
@@ -108,21 +113,50 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
     execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture)?;
 
-    let file_path1: PathBuf = home_dir().unwrap().join(".xtodo-list1.json");
-    let file_path2: PathBuf = home_dir().unwrap().join(".xtodo-list2.json");
+    // Setup file path and directory. Move old JSON files to .xtodo directory, if needed.
+    let path = Path::new(home_dir().unwrap().as_path()).join(".xtodo");
+    if !path.exists() { // Optional: check if directory already exists
+        fs::create_dir(path)?;
+        if home_dir().unwrap().join(".xtodo-list1.json").exists() {
+            fs::rename(home_dir().unwrap().as_path().join(".xtodo-list1.json"),
+                       home_dir().unwrap().as_path().join(".xtodo/xtodo-list1.json"))?;
+        }
+        if home_dir().unwrap().join(".xtodo-list2.json").exists() {
+            fs::rename(home_dir().unwrap().as_path().join(".xtodo-list2.json"),
+                       home_dir().unwrap().as_path().join(".xtodo/xtodo-list2.json"))?;
+        }
+    }
+    let file_path1: PathBuf = home_dir().unwrap().join(".xtodo/xtodo-list1.json");
+    let file_path2: PathBuf = home_dir().unwrap().join(".xtodo/xtodo-list2.json");
 
     let mut app = App {
         input: String::new(),
         input_mode: InputMode::Normal,
         lists: [
-            TaskList::new(" List 1 ", RED, file_path1.to_str().unwrap()),
-            TaskList::new(" List 2 ", YELLOW, file_path2.to_str().unwrap()),
+            TaskList::new(" List 1 ", file_path1.to_str().unwrap()),
+            TaskList::new(" List 2 ", file_path2.to_str().unwrap()),
         ],
         active_idx: 0,
         cursor_pos: 0,
         edit_task: false,
         show_help: false,
+        theme: Theme::Default,
     };
+
+    // Read theme.json file and set theme
+    let path = Path::new(home_dir().unwrap().as_path()).join(".xtodo");
+    if !path.exists() {} // Optional: check if directory already exists
+    if home_dir().unwrap().join(".xtodo/theme.json").exists() {
+        let file_content = fs::read_to_string(home_dir().unwrap().as_path().join(".xtodo/theme.json"))?;
+        let deserialized_event: Theme = serde_json::from_str(&file_content)
+            .expect("Failed to deserialize from JSON string");
+        app.theme = deserialized_event;
+    }
+    else {
+        app.theme = Theme::Default;
+    }
+
+
 
     loop {
         terminal.draw(|f| ui(f, &mut app))?;
@@ -131,7 +165,14 @@ fn main() -> Result<(), Box<dyn Error>> {
             if key.kind == KeyEventKind::Press {
                 match app.input_mode {
                     InputMode::Normal => match key.code {
-                        KeyCode::Char('q') => break,
+                        KeyCode::Char('q') => {
+                            let json_string = serde_json::to_string(&app.theme)
+                                .expect("Failed to serialize to JSON string");
+                            fs::write(Path::new(home_dir().unwrap().as_path()).join(".xtodo/theme.json"), json_string)?;
+
+                            // TaskList::save_theme(app);
+                            break;
+                        },
                         KeyCode::Char('?') => app.show_help = !app.show_help,
                         KeyCode::Char('a') => {
                             app.input_mode = InputMode::Edit;
@@ -170,6 +211,16 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 app.active_list().toggle_selected(|i| i.complete = !i.complete)
                             }
                         }
+                        KeyCode::Char('t') => {
+                            match app.theme {
+                                Theme::Default => {
+                                    app.theme = Theme::Light;
+                                }
+                                Theme::Light => {
+                                    app.theme = Theme::Default;
+                                }
+                            }
+                        },
                         _ => {}
                     },
                     InputMode::Edit => match key.code {
@@ -256,13 +307,52 @@ fn main() -> Result<(), Box<dyn Error>> {
 fn ui(f: &mut Frame, app: &mut App) {
     let chunks = Layout::vertical([
         Constraint::Fill(1),
-        Constraint::Length(if matches!(app.input_mode, InputMode::Edit) { 3 } else { 0 }),
+        Constraint::Length(
+            if matches!(app.input_mode, InputMode::Edit) { 3 }
+            else { 0 }),
         Constraint::Length(2)
     ]).split(f.area());
 
     let panels = Layout::horizontal([Constraint::Percentage(50),
         Constraint::Percentage(50)]).split(chunks[0]);
 
+    let mut c_list1_border = Color::Rgb(250, 160, 160);
+    let mut c_list2_border = Color::Rgb(255, 250, 160);
+    let mut c_edit_border = Color::Rgb(250, 200, 152);
+    let c_inactive_border = Color::Rgb(120, 120, 120);
+    let mut c_list1_highlight = Color::Rgb(83, 53, 53);
+    let mut c_list2_highlight = Color::Rgb(85, 82, 53);
+    let mut c_list_highlight_move = Color::Rgb(150, 100, 76);
+    let mut c_list_highlight_inactive = Color::Rgb(30, 30, 30);
+    let mut c_list_delete = Color::Rgb(100,100,255);
+    let mut c_menu_hotkey = Color::Rgb(255, 50, 50);
+    let mut c_complete = Color::Rgb(50, 255, 50);
+    let mut c_delete = Color::Rgb(255,0,255);
+    let mut c_important = Color::Rgb(255, 50, 50);
+    let mut c_pipe = Color::Rgb(50, 50, 50);
+    let mut c_bg = Color::Rgb(0,0,0);
+    let mut c_fg = Color::Rgb(230,230,230);
+    match app.theme {
+        Theme::Default => {
+        }
+        Theme::Light => {
+            c_list1_border = Color::Rgb(50, 50, 200);
+            c_list2_border = Color::Rgb(50, 200, 50);
+            c_list1_highlight = Color::Rgb(100, 100, 200);
+            c_list2_highlight = Color::Rgb(100, 200, 100);
+            c_list_highlight_move = Color::Rgb(200, 150, 100);
+            c_list_highlight_inactive = Color::Rgb(200, 200, 200);
+            c_list_delete = Color::Rgb(200,50,200);
+            c_bg = Color::Rgb(220,220,220);
+            c_fg = Color::Rgb(0,0,0);
+            c_edit_border = Color::Rgb(125, 100, 76);
+            c_complete = Color::Rgb(50, 200, 50);
+            c_delete = Color::Rgb(200,0,200);
+            c_important = Color::Rgb(255, 50, 50);
+            c_pipe = Color::Rgb(50, 50, 50);
+            c_menu_hotkey = Color::Rgb(200, 50, 50);
+        }
+    }
 
     match app.input_mode  {
         InputMode::Edit => {
@@ -278,24 +368,29 @@ fn ui(f: &mut Frame, app: &mut App) {
     for (i, list) in app.lists.iter_mut().enumerate() {
         let is_active = i == app.active_idx;
 
-        // Original specific RGB border colors
-        let border_color = match (is_active, &app.active_idx) {
-            (true, 0) => { RED },
-            (true, 1) => { YELLOW },
-            (false, _) => { LIGHTGRAY },
-            _ => { LIGHTGRAY },
+        let c_border = match (is_active, &app.active_idx) {
+            (true, 0) => { c_list1_border },
+            (true, 1) => { c_list2_border},
+            (false, _) => { c_inactive_border },
+            _ => { c_inactive_border },
         };
 
-        // Original specific RGB highlight background colors
+        let c_title = match (is_active, &app.active_idx) {
+            (true, 0) => { c_list1_border },
+            (true, 1) => { c_list2_border},
+            (false, 0) => { c_list2_border },
+            (false, 1) => { c_list1_border },
+            _ => { c_inactive_border },
+        };
+
         let highlight_bg = match (is_active, &app.input_mode, &app.active_idx) {
-            (true, InputMode::Edit, 0) => { DARKRED },
-            (true, InputMode::Edit, 1) => { DARKYELLOW },
-            (true, InputMode::Normal, 0) => { DARKRED },
-            (true, InputMode::Normal, 1) => { DARKYELLOW },
-            (true, InputMode::Move, 0) => { DARKORANGE },
-            (true, InputMode::Move, 1) => { DARKORANGE },
-            (false, _, _) => { DARKGRAY },
-            _ => { DARKGRAY },
+            (true, InputMode::Edit, 0) => { c_list1_highlight },
+            (true, InputMode::Edit, 1) => { c_list2_highlight },
+            (true, InputMode::Normal, 0) => { c_list1_highlight },
+            (true, InputMode::Normal, 1) => { c_list2_highlight },
+            (true, InputMode::Move, _) => { c_list_highlight_move },
+            (false, _, _) => { c_list_highlight_inactive },
+            _ => { c_list_highlight_inactive },
         };
 
         // 1. Calculate the available text width dynamically
@@ -341,28 +436,30 @@ fn ui(f: &mut Frame, app: &mut App) {
             }
             let sym_t = match item.delete {
                 true => { Span::styled(task_lines[0].to_string(),
-                                        Style::default().fg(Color::Rgb(100,100,255)))
+                                        Style::default().fg(c_list_delete))
                 },
-                false => { Span::styled(task_lines[0].clone().to_string(), Style::default()) },
+                false => { Span::styled(task_lines[0].clone().to_string(),
+                                        Style::default()) },
             };
 
             // 2b. Constructing the multiline ListItem
             let mut lines = vec![Line::from(vec![
                 Span::raw("["),
-                Span::styled(sym_c, Color::Green).bold(),
-                Span::styled(sym_d, Color::Magenta).bold(), Span::raw("] "),
-                Span::styled(sym_i, Color::LightRed).bold(), Span::raw(" "),
+                Span::styled(sym_c, c_complete).bold(),
+                Span::styled(sym_d, c_delete).bold(), Span::raw("] "),
+                Span::styled(sym_i, c_important).bold(), Span::raw(" "),
                 sym_t
-                // Span::raw(task_lines[0].clone())
             ])];
 
             // 2c. Add overflow lines with correct padding to match "[CD] * "
             for task_line in task_lines.into_iter().skip(1) {
                 let sym_t = match item.delete {
                     true => { Span::styled(task_line.to_string(),
-                                           Style::default().fg(Color::Rgb(100,100,255)))
+                                           Style::default().fg(c_list_delete))
                     },
-                    false => { Span::styled(task_line.clone().to_string(), Style::default()) },
+                    false => { Span::styled(task_line.to_string(),
+                                            Style::default())
+                    },
                 };
                 lines.push(Line::from(vec![
                     Span::raw("      "),
@@ -383,15 +480,15 @@ fn ui(f: &mut Frame, app: &mut App) {
         let widget = List::new(items)
             .block(Block::default()
                 .title(Line::from(vec![
-                    Span::from(list.title.as_str()).style(list.title_color),
+                    Span::from(list.title.as_str()).style(c_title),
                     Span::from(format!(" [{}/{}] ",srow,nrows))
                 ]))
                 .title_style(Style::default().bold())
                 .borders(Borders::ALL)
-                .border_style(border_color)
+                .border_style(c_border)
                 .border_type(BorderType::Rounded))
-            .bg(Color::Rgb(0,0,0))
-            .fg(Color::White)
+            .bg(c_bg)
+            .fg(c_fg)
             .highlight_style(Style::default().bg(highlight_bg));
 
         f.render_stateful_widget(widget, panels[i], &mut list.state);
@@ -405,18 +502,18 @@ fn ui(f: &mut Frame, app: &mut App) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(if matches!(app.input_mode, InputMode::Edit) {
-            Style::default().fg(ORANGE)
+            Style::default().fg(c_edit_border)
         } else {
             Style::default()
         })
-        .bg(Color::Rgb(0,0,0))
-        .fg(Color::White);
+        .bg(c_bg)
+        .fg(c_fg);
 
     f.render_widget(Paragraph::new(app.input.as_str()).block(input_block), chunks[1]);
 
-    let hotkey_style = Style::default().fg(Color::LightRed);
-    let text_style = Style::default().fg(Color::White);
-    let pipe_style = Style::default().fg(Color::DarkGray);
+    let hotkey_style = Style::default().fg(c_menu_hotkey);
+    let text_style = Style::default().fg(c_fg);
+    let pipe_style = Style::default().fg(c_pipe);
     let help_msg1 = Line::from(vec![
         Span::styled(" a", hotkey_style), Span::styled("dd", text_style),
         Span::styled(" | ", pipe_style),
@@ -442,28 +539,27 @@ fn ui(f: &mut Frame, app: &mut App) {
         Span::styled(" | ", pipe_style),
         Span::styled("s", hotkey_style), Span::styled("witch", text_style),
         Span::styled(" | ", pipe_style),
-        Span::styled("copy item: ", text_style), Span::styled("ctrl-c ", hotkey_style),
+        Span::styled("copy: ", text_style), Span::styled("ctrl-c ", hotkey_style),
         Span::styled(" | ", pipe_style),
-        Span::styled("remove item: ", text_style),
+        Span::styled("remove: ", text_style),
         Span::styled("d", hotkey_style), Span::styled("elete then ", text_style),
         Span::styled("e", text_style), Span::styled("x", hotkey_style),
         Span::styled("punge", text_style),
+        Span::styled(" | ", pipe_style),
+        Span::styled("t", hotkey_style), Span::styled("heme", text_style),
         Span::styled(" | ", pipe_style),
         Span::styled("q", hotkey_style), Span::styled("uit ", text_style),
     ]).left_aligned();
 
     f.render_widget(Paragraph::new(vec![help_msg1, help_msg2])
-                        .bg(HELP_BACKGROUND).fg(Color::White),
+                        .bg(c_bg).fg(c_fg),
                     chunks[2]);
 
     if app.show_help {
-        let area = centered_rect(f.area()); // 60% width, 20% height
-        // let area = centered_rect(60, 20, f.area()); // 60% width, 20% height
+        let area = centered_rect(f.area());
         let help_text = vec![
-            Line::from(Span::styled(" https://github.com/mabognar ", Color::White)),
-            Line::from(vec![Span::styled(" https://crates.io/crates/xtodo ", Color::White)]),
-            // Line::from(vec![Span::raw(" To close, type "),
-            //                 Span::styled("? ", Color::LightRed)])
+            Line::from(Span::styled(" https://github.com/mabognar ", c_fg)),
+            Line::from(vec![Span::styled(" https://crates.io/crates/xtodo ", c_fg)]),
         ];
 
         const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -471,11 +567,11 @@ fn ui(f: &mut Frame, app: &mut App) {
             .title(Line::from(vec![Span::raw(" xtodo "),
                                    Span::raw(format!("({}) ",PKG_VERSION))]))
             .title_bottom(Line::from(vec![Span::raw(" To close, type "),
-                                          Span::styled("? ", Color::LightRed)]))
+                                          Span::styled("? ", c_menu_hotkey)]))
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(ORANGE))
-            .bg(Color::Black);
+            .border_style(Style::default().fg(c_edit_border))
+            .bg(c_bg).fg(c_menu_hotkey);
 
         let help_para = Paragraph::new(help_text)
             .block(block)
@@ -487,34 +583,14 @@ fn ui(f: &mut Frame, app: &mut App) {
 
     fn centered_rect(r: ratatui::layout::Rect) -> ratatui::layout::Rect {
         let popup_layout = Layout::vertical([
-            Constraint::Fill(1),
-            Constraint::Length(4),
-            Constraint::Fill(1),
-        ])
-            .split(r);
+            Constraint::Fill(1), Constraint::Length(4), Constraint::Fill(1),
+        ]).split(r);
 
         Layout::horizontal([
-            Constraint::Fill(1),
-            Constraint::Length(33),
-            Constraint::Fill(1),
-        ])
-            .split(popup_layout[1])[1]
+            Constraint::Fill(1), Constraint::Length(33), Constraint::Fill(1),
+        ]).split(popup_layout[1])[1]
     }
 
-    // fn centered_rect(percent_x: u16, percent_y: u16, r: ratatui::layout::Rect) -> ratatui::layout::Rect {
-    //     let popup_layout = Layout::vertical([
-    //         Constraint::Percentage((100 - percent_y) / 2),
-    //         Constraint::Percentage(percent_y),
-    //         Constraint::Percentage((100 - percent_y) / 2),
-    //     ])
-    //         .split(r);
-    //
-    //     Layout::horizontal([
-    //         Constraint::Percentage((100 - percent_x) / 2),
-    //         Constraint::Percentage(percent_x),
-    //         Constraint::Percentage((100 - percent_x) / 2),
-    //     ])
-    //         .split(popup_layout[1])[1]
-    // }
-
 }
+
+
